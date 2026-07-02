@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "AI Bounty Judge",
   description:
-    "Submit answers to a bounty. After the deadline, Ritual AI ranks all submissions. The bounty owner finalizes the winner.",
+    "Commit private answers, reveal after submissions close, and use Ritual AI to rank valid reveals in one batch.",
 };
 
 export default function RootLayout({

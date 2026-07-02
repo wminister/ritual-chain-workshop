@@ -5,10 +5,11 @@ import { useAccount, usePublicClient } from "wagmi";
 import aiJudgeAbi from "@/abi/AIJudge";
 import { contractAddress, executorAddress } from "@/config/contract";
 import { ritualChain } from "@/config/wagmi";
-import type { Bounty } from "@/lib/bounty";
+import { canJudge, type Bounty } from "@/lib/bounty";
 import { buildJudgeAllLlmInput, type JudgeSubmission } from "@/lib/ritualLlm";
 import { useWriteTx } from "@/hooks/useWriteTx";
 import { useRitualWalletStatus } from "@/hooks/useRitualWalletStatus";
+import { useNow } from "@/hooks/useNow";
 import { RitualWalletPanel } from "@/components/RitualWalletPanel";
 import { Card, CardHeader, CardBody, Button, TxStatus, Notice, Spinner } from "@/components/ui";
 
@@ -27,6 +28,7 @@ export function JudgeAll({
 }) {
   const { address } = useAccount();
   const publicClient = usePublicClient({ chainId: ritualChain.id });
+  const now = useNow();
   const [gathering, setGathering] = useState(false);
   const [gatherError, setGatherError] = useState<string | null>(null);
   const tx = useWriteTx(() => onJudged());
@@ -37,8 +39,8 @@ export function JudgeAll({
 
   const count = Number(bounty.submissionCount);
 
-  // Gate per spec: owner only, has submissions, not yet judged.
-  if (!isOwner || bounty.judged || bounty.finalized || count === 0) {
+  // Gate per spec: owner only, has revealed submissions, reveal phase closed.
+  if (!isOwner || !canJudge(bounty, now / 1000) || count === 0) {
     return null;
   }
 

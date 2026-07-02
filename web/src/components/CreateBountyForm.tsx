@@ -21,9 +21,9 @@ import {
 
 const explorerBase = ritualChain.blockExplorers?.default.url;
 
-/** Default datetime-local value = now + 1 hour, in the input's expected format. */
-function defaultDeadline(): string {
-  const d = new Date(Date.now() + 60 * 60 * 1000);
+/** Default datetime-local value, in the input's expected format. */
+function defaultDeadline(offsetMs: number): string {
+  const d = new Date(Date.now() + offsetMs);
   // Strip seconds/tz to YYYY-MM-DDTHH:mm in local time.
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
@@ -35,7 +35,12 @@ export function CreateBountyForm({ onCreated }: { onCreated?: (bountyId: bigint)
   const { isConnected } = useAccount();
   const [title, setTitle] = useState("");
   const [rubric, setRubric] = useState("");
-  const [deadline, setDeadline] = useState(defaultDeadline());
+  const [submissionDeadline, setSubmissionDeadline] = useState(
+    defaultDeadline(60 * 60 * 1000),
+  );
+  const [revealDeadline, setRevealDeadline] = useState(
+    defaultDeadline(2 * 60 * 60 * 1000),
+  );
   const [reward, setReward] = useState("");
   const [createdId, setCreatedId] = useState<bigint | null>(null);
 
@@ -61,9 +66,15 @@ export function CreateBountyForm({ onCreated }: { onCreated?: (bountyId: bigint)
   const validation = useMemo(() => {
     if (!title.trim()) return "Title is required.";
     if (!rubric.trim()) return "Rubric is required.";
-    if (!deadline) return "Pick a deadline.";
-    const ts = new Date(deadline).getTime();
-    if (!Number.isFinite(ts)) return "Invalid deadline.";
+    if (!submissionDeadline) return "Pick a submission deadline.";
+    if (!revealDeadline) return "Pick a reveal deadline.";
+    const submissionTs = new Date(submissionDeadline).getTime();
+    const revealTs = new Date(revealDeadline).getTime();
+    if (!Number.isFinite(submissionTs)) return "Invalid submission deadline.";
+    if (!Number.isFinite(revealTs)) return "Invalid reveal deadline.";
+    if (revealTs <= submissionTs) {
+      return "Reveal deadline must be after the submission deadline.";
+    }
     if (reward !== "") {
       try {
         parseEther(reward);
@@ -72,21 +83,26 @@ export function CreateBountyForm({ onCreated }: { onCreated?: (bountyId: bigint)
       }
     }
     return null;
-  }, [title, rubric, deadline, reward]);
+  }, [title, rubric, submissionDeadline, revealDeadline, reward]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (validation || !contractAddress) return;
 
-    const deadlineMs = new Date(deadline).getTime();
-    if (deadlineMs <= Date.now()) {
+    const submissionDeadlineMs = new Date(submissionDeadline).getTime();
+    const revealDeadlineMs = new Date(revealDeadline).getTime();
+    if (submissionDeadlineMs <= Date.now()) {
       // Clock read belongs in the event handler, not render.
-      window.alert("Deadline must be in the future.");
+      window.alert("Submission deadline must be in the future.");
+      return;
+    }
+    if (revealDeadlineMs <= submissionDeadlineMs) {
+      window.alert("Reveal deadline must be after the submission deadline.");
       return;
     }
 
-    const deadlineTs = BigInt(Math.floor(deadlineMs / 1000));
-    console.log("Creating bounty with", { title, rubric, deadlineTs, reward });
+    const submissionDeadlineTs = BigInt(Math.floor(submissionDeadlineMs / 1000));
+    const revealDeadlineTs = BigInt(Math.floor(revealDeadlineMs / 1000));
     const value = reward.trim() === "" ? 0n : parseEther(reward.trim());
     setCreatedId(null);
 
@@ -95,7 +111,7 @@ export function CreateBountyForm({ onCreated }: { onCreated?: (bountyId: bigint)
         address: contractAddress,
         abi: aiJudgeAbi,
         functionName: "createBounty",
-        args: [title.trim(), rubric.trim(), deadlineTs],
+        args: [title.trim(), rubric.trim(), submissionDeadlineTs, revealDeadlineTs],
         value,
         chainId: ritualChain.id,
       });
@@ -138,11 +154,18 @@ export function CreateBountyForm({ onCreated }: { onCreated?: (bountyId: bigint)
           </Field>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Deadline">
+            <Field label="Submission deadline">
               <Input
                 type="datetime-local"
-                value={deadline}
-                onChange={(e) => setDeadline(e.target.value)}
+                value={submissionDeadline}
+                onChange={(e) => setSubmissionDeadline(e.target.value)}
+              />
+            </Field>
+            <Field label="Reveal deadline">
+              <Input
+                type="datetime-local"
+                value={revealDeadline}
+                onChange={(e) => setRevealDeadline(e.target.value)}
               />
             </Field>
             <Field label="Reward (RITUAL)" hint="Locked in the contract on create.">
