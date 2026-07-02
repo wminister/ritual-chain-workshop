@@ -1,37 +1,50 @@
-# Architecture note: commit-reveal vs Ritual-native privacy
+# Architecture note
 
-## Required track: commit-reveal
+## What I implemented
 
-The implemented contract uses a standard EVM commit-reveal design. During the
-submission phase, the chain stores only `bytes32 commitment` values. A
-participant computes the commitment from the answer, a private salt,
-`msg.sender`, and `bountyId`, which prevents another address from copying the
-commitment and revealing the same plaintext later.
+The contract uses a commit-reveal pattern. During the submission phase, the
+chain only stores a `bytes32` commitment. The commitment is made from the answer,
+a private salt, `msg.sender`, and `bountyId`.
 
-Plaintext answers first appear on-chain during the reveal phase. This is enough
-to stop copying during submission, but revealed answers become public before the
-owner calls `judgeAll`. The contract therefore enforces that only revealed,
-verified answers are included in the eligible submission list.
+```solidity
+keccak256(abi.encodePacked(answer, salt, msg.sender, bountyId))
+```
 
-## Advanced track: Ritual-native hidden submissions
+I included `msg.sender` and `bountyId` so a different wallet cannot just copy
+someone's commitment and reveal the same answer for another bounty. The plaintext
+answer only appears on-chain during the reveal phase. That still means answers
+become public before `judgeAll`, but it fixes the main copying problem during
+the submission window.
 
-A more Ritual-native version would keep plaintext answers hidden until the AI
-judging step itself. Participants would encrypt answers off-chain for a Ritual
-TEE executor or a Ritual-backed private input/key flow. The contract would store
-only metadata such as:
+The contract only adds an answer to the judging list after the reveal checks
+pass. If someone never reveals, or reveals with the wrong salt, their answer is
+not eligible.
 
-- `encryptedAnswersRef`, for example an IPFS, object storage, or encrypted blob reference
+## Ritual-native version
+
+A more Ritual-native version could keep answers hidden until the actual judging
+step. My design for that version would be:
+
+- participants encrypt their answers off-chain
+- encrypted answers are uploaded to IPFS, object storage, or another off-chain store
+- the contract stores references and hashes, not plaintext answers
+- a Ritual TEE executor decrypts the batch privately
+- the LLM receives all submissions together in one request
+- after judging, the winner and a final answer bundle can be published
+
+The on-chain data would be things like:
+
+- `encryptedAnswersRef`
 - `encryptedAnswersHash`, a content hash committing to the encrypted batch
 - per-participant commitment or receipt hashes
 - bounty deadlines, owner, reward, and final judging status
 
-Plaintext answers would exist only on the participant machine before upload and
-inside the TEE during judging. They would not be stored in public contract
-storage during submission or reveal. The LLM should receive one batch containing
-all decrypted answers and the rubric, so it can compare submissions directly and
-avoid one LLM call per answer.
+Plaintext answers would only exist on the participant's machine before upload
+and inside the TEE during judging. They would not be stored in public contract
+storage. The important part is that the LLM should judge the submissions as a
+batch, because the point is to compare answers against each other and the rubric.
 
-After judging, the TEE workflow can publish a final output bundle:
+The final result could look something like this:
 
 ```json
 {
@@ -49,17 +62,16 @@ After judging, the TEE workflow can publish a final output bundle:
 }
 ```
 
-The contract should store `revealedAnswersRef` and `revealedAnswersHash` rather
-than every plaintext answer, unless the bounty intentionally accepts the gas
-cost of full on-chain storage. The human owner still finalizes the payout after
-reviewing the AI recommendation. This preserves a human-in-the-loop decision
-while using Ritual's TEE-backed execution for private AI evaluation.
+The contract could store `revealedAnswersRef` and `revealedAnswersHash` instead
+of storing all plaintext answers directly. That keeps gas costs lower and still
+lets people verify that the final published bundle matches what was committed.
+The AI can recommend a winner, but I would still have the bounty owner finalize
+the payout.
 
-## Comparison
+## Tradeoff
 
-Commit-reveal is simple, cheap, and works on any EVM chain. Its main limitation
-is that answers become public during the reveal window, before AI judging
-finishes. A Ritual-native encrypted design is more complex because it needs key
-management, encrypted storage, and a trusted execution flow, but it gives better
-privacy because plaintext is visible only to the participant and the private
-executor until the final result is published.
+Commit-reveal is simpler and works on any EVM chain. The downside is that
+answers become public during the reveal window. The Ritual-native encrypted
+version is more complicated because it needs encrypted storage and private
+execution, but it gives better privacy because participants do not see each
+other's answers before the judging step.
